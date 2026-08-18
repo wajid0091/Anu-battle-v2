@@ -1,0 +1,6 @@
+{
+  "name": "Anu battle",
+  "description": "Premium Esports Tournament Join & Rewards app with Realtime Database Synchronization",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
