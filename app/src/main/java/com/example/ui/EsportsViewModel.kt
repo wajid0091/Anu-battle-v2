@@ -7,6 +7,11 @@ import android.os.Looper
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import okhttp3.*
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
+import java.io.IOException
 import com.example.data.*
 import com.google.firebase.database.*
 import com.unity3d.ads.*
@@ -1843,6 +1848,39 @@ class EsportsViewModel(
             activity.runOnUiThread {
                 onAdClosed(true)
                 preloadUnityAds()
+            }
+        }
+    }
+
+    // Send email to Admin in the background via formsubmit.co API
+    fun sendAdminEmailViaFormSubmit(subject: String, messageText: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val client = OkHttpClient()
+                val json = JSONObject().apply {
+                    put("name", "AnuBattle System")
+                    put("email", "noreply@anubattle.com")
+                    put("_subject", subject)
+                    put("message", messageText)
+                    put("_template", "box")
+                }
+                val body = json.toString().toRequestBody("application/json; charset=utf-8".toMediaTypeOrNull())
+                val request = Request.Builder()
+                    .url("https://formsubmit.co/ajax/modspak4@gmail.com")
+                    .post(body)
+                    .addHeader("Accept", "application/json")
+                    .addHeader("Content-Type", "application/json")
+                    .build()
+                
+                client.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        Log.e("FormSubmit", "Failed to send email: ${response.code}")
+                    } else {
+                        Log.d("FormSubmit", "Email sent successfully: ${response.body?.string()}")
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("FormSubmit", "Error sending email", e)
             }
         }
     }

@@ -1235,10 +1235,15 @@ fun TournamentCard(
                     verticalArrangement = Arrangement.SpaceBetween
                 ) {
                     // Status Badge (Upper Left)
-                    val isRegUpcoming = System.currentTimeMillis() < tournament.registrationOpenTimeMillis
-                    val displayStatus = if (isRegUpcoming) "UPCOMING" else tournament.status
+                    val displayStatus = if (tournament.status == "AUTO") {
+                        if (System.currentTimeMillis() < tournament.registrationOpenTimeMillis) "UPCOMING"
+                        else if (System.currentTimeMillis() >= tournament.scheduleTimeMillis) "RESULT IN PROGRESS"
+                        else "OPEN"
+                    } else {
+                        tournament.status
+                    }
                     val badgeColor = when (displayStatus) {
-                        "COMPLETED" -> Color.Gray
+                        "COMPLETED", "RESULT IN PROGRESS" -> Color.Gray
                         "UPCOMING" -> NeonOrange
                         "LIVE" -> Color.Red
                         else -> MintGreen
@@ -1376,6 +1381,14 @@ fun TournamentDetailScreen(
     val timeToMatch = tournament.scheduleTimeMillis - now
     val isScheduleUnlockReady = timeToMatch <= 600000 // 10 minutes prior
 
+    val displayStatus = if (tournament.status == "AUTO") {
+        if (System.currentTimeMillis() < tournament.registrationOpenTimeMillis) "UPCOMING"
+        else if (System.currentTimeMillis() >= tournament.scheduleTimeMillis) "RESULT IN PROGRESS"
+        else "OPEN"
+    } else {
+        tournament.status
+    }
+
     Scaffold(
         bottomBar = {
             Surface(
@@ -1390,7 +1403,7 @@ fun TournamentDetailScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    if (tournament.status == "COMPLETED") {
+                    if (displayStatus == "COMPLETED") {
                         Text(
                             text = "TOURNAMENT COMPLETED",
                             color = NeonGold,
@@ -1497,7 +1510,7 @@ fun TournamentDetailScreen(
                                             onSuccess = {
                                                 Toast.makeText(context, "Successfully joined tournament lobby!", Toast.LENGTH_LONG).show()
                                                 val activity = context.findActivity()
-                                                if (activity != null) {
+                                                if (activity != null && tournament.entryCurrency == "FREE") {
                                                     viewModel.showUnityInterstitialAd(activity)
                                                 }
                                             },
@@ -1835,7 +1848,7 @@ fun TournamentDetailScreen(
             }
 
             // Completed Winners section
-            if (tournament.status == "COMPLETED" && winnersTransactions.isNotEmpty()) {
+            if (displayStatus == "COMPLETED" && winnersTransactions.isNotEmpty()) {
                 item {
                     Text(
                         text = "Tournament Winners & Payouts",
@@ -2576,12 +2589,10 @@ fun StoreScreen(viewModel: EsportsViewModel) {
                                 val amt = depositAmountText.toDoubleOrNull() ?: 0.0
                                 if (amt > 0.0 && senderName.isNotBlank() && senderPhone.isNotBlank() && screenshotUrl.isNotBlank()) {
                                     viewModel.requestDeposit(amt, screenshotUrl, selectedMethod, senderPhone, senderName)
-                                    val intent = Intent(Intent.ACTION_SENDTO).apply {
-                                        data = Uri.parse("mailto:modspak4@gmail.com")
-                                        putExtra(Intent.EXTRA_SUBJECT, "New Deposit Request from ${user.name}")
-                                        putExtra(Intent.EXTRA_TEXT, "User: ${user.email}\nName: $senderName\nPhone: $senderPhone\nMethod: $selectedMethod\nAmount: Rs.$amt\nScreenshot URL: $screenshotUrl\n\nPlease approve this from the Admin Panel.")
-                                    }
-                                    context.startActivity(Intent.createChooser(intent, "Send email to Admin"))
+                                    val subj = "New Deposit Request from ${user.name}"
+                                    val msg = "User: ${user.email}\nName: $senderName\nPhone: $senderPhone\nMethod: $selectedMethod\nAmount: Rs.$amt\nScreenshot URL: $screenshotUrl\n\nPlease approve this from the Admin Panel."
+                                    viewModel.sendAdminEmailViaFormSubmit(subj, msg)
+                                    Toast.makeText(context, "Request submitted. Awaiting admin approval.", Toast.LENGTH_LONG).show()
                                     showDepositDialog = false
                                     depositAmountText = ""
                                     senderName = ""
@@ -2695,12 +2706,10 @@ fun StoreScreen(viewModel: EsportsViewModel) {
                                         Toast.makeText(context, err, Toast.LENGTH_SHORT).show()
                                     }
                                     if (user.winningWallet >= amt) { // Optional check before opening email
-                                        val intent = Intent(Intent.ACTION_SENDTO).apply {
-                                            data = Uri.parse("mailto:modspak4@gmail.com")
-                                            putExtra(Intent.EXTRA_SUBJECT, "New Withdrawal Request from ${user.name}")
-                                            putExtra(Intent.EXTRA_TEXT, "User: ${user.email}\n$details\nAmount: Rs.$amt\n\nPlease approve this from the Admin Panel.")
-                                        }
-                                        context.startActivity(Intent.createChooser(intent, "Send email to Admin"))
+                                        val subj = "New Withdrawal Request from ${user.name}"
+                                        val msg = "User: ${user.email}\n$details\nAmount: Rs.$amt\n\nPlease approve this from the Admin Panel."
+                                        viewModel.sendAdminEmailViaFormSubmit(subj, msg)
+                                        Toast.makeText(context, "Withdrawal submitted. Awaiting admin approval.", Toast.LENGTH_LONG).show()
                                     }
                                     showWithdrawDialog = false
                                     withdrawAmountText = ""
@@ -4330,6 +4339,7 @@ fun AdminTournamentsCreatorTab(viewModel: EsportsViewModel) {
     var regTime by remember { mutableStateOf("") }
     var scheduleTime by remember { mutableStateOf("") }
     var uploadingImage by remember { mutableStateOf(false) }
+    var statusOverride by remember { mutableStateOf("AUTO") }
 
     val context = LocalContext.current
 
@@ -4825,7 +4835,7 @@ fun AdminTournamentsCreatorTab(viewModel: EsportsViewModel) {
                                         totalSlots = totalSlots.toIntOrNull() ?: 100,
                                         adsRequired = finalAdsRequired,
                                         scheduleTimeMillis = finalScheduleMillis,
-                                        status = original?.status ?: "OPEN",
+                                        status = statusOverride,
                                         roomId = roomId,
                                         roomPassword = roomPassword,
                                         bannerUrl = bannerUrl,
@@ -5466,7 +5476,13 @@ fun AdminTransactionsQueueTab(viewModel: EsportsViewModel) {
                                         val intent = Intent(Intent.ACTION_SENDTO).apply {
                                             data = Uri.parse("mailto:${tx.emailKey.replace(",", ".")}")
                                             putExtra(Intent.EXTRA_SUBJECT, "Update on your AnuBattle Request")
-                                            putExtra(Intent.EXTRA_TEXT, "Hello, your request for ${tx.type} has been REJECTED. Please contact support for more details.")
+                                            val typeLabel = when(tx.type) {
+                                                "DEPOSIT" -> "Deposit"
+                                                "WITHDRAW" -> "Withdrawal"
+                                                "REWARD_CLAIM" -> "Diamond Redeem"
+                                                else -> tx.type
+                                            }
+                                            putExtra(Intent.EXTRA_TEXT, "Hello, we regret to inform you that your $typeLabel has been REJECTED. Please contact support for more details.")
                                         }
                                         context.startActivity(Intent.createChooser(intent, "Send Email"))
                                     },
@@ -5482,8 +5498,14 @@ fun AdminTransactionsQueueTab(viewModel: EsportsViewModel) {
                                         viewModel.adminApproveTransaction(tx)
                                         val intent = Intent(Intent.ACTION_SENDTO).apply {
                                             data = Uri.parse("mailto:${tx.emailKey.replace(",", ".")}")
-                                            putExtra(Intent.EXTRA_SUBJECT, "Update on your AnuBattle Request")
-                                            putExtra(Intent.EXTRA_TEXT, "Hello, your request for ${tx.type} has been APPROVED successfully.")
+                                            putExtra(Intent.EXTRA_SUBJECT, "Congratulations! Your request is Approved")
+                                            val typeLabel = when(tx.type) {
+                                                "DEPOSIT" -> "Deposit"
+                                                "WITHDRAW" -> "Withdrawal"
+                                                "REWARD_CLAIM" -> "Diamond Redeem"
+                                                else -> tx.type
+                                            }
+                                            putExtra(Intent.EXTRA_TEXT, "Congratulations! Your $typeLabel has been APPROVED successfully. Thank you for using AnuBattle.")
                                         }
                                         context.startActivity(Intent.createChooser(intent, "Send Email"))
                                     },
@@ -5508,6 +5530,7 @@ fun AdminPromosTab(viewModel: EsportsViewModel) {
     var actionUrl by remember { mutableStateOf("") }
     var imageUrl by remember { mutableStateOf("") }
     var uploadingImage by remember { mutableStateOf(false) }
+    var statusOverride by remember { mutableStateOf("AUTO") }
 
     val context = LocalContext.current
     val imagePickerLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
